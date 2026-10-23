@@ -23,6 +23,13 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
+  it('/api/health (GET) reports API process health', () => {
+    return request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200)
+      .expect({ status: 'ok', service: 'Unblock API' });
+  });
+
   afterEach(async () => {
     await app.close();
   });
