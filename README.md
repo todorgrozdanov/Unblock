@@ -119,7 +119,7 @@ Send JSON containing exactly `startsAt` and `durationMinutes`:
 - `startsAt`: a valid ISO 8601 date-time with an explicit timezone (`Z` or a numeric offset such as `+02:00`), strictly in the future when processed by the backend.
 - `durationMinutes`: a JSON integer from 1 through 480. Numeric strings are rejected.
 
-Missing, invalid, past-date, and unexpected properties return HTTP 400. Successful creation returns HTTP 201 with `id`, `startsAt`, `durationMinutes`, and `createdAt`. Dates are serialized in UTC. There is no overlap prevention in this step, and these endpoints do not yet require authentication.
+Missing, invalid, past-date, and unexpected properties return HTTP 400. Successful creation returns HTTP 201 with `id`, `startsAt`, `durationMinutes`, and `createdAt`. Dates are serialized in UTC. There is no overlap prevention in this step. GET /api/slots remains public; POST /api/slots now requires the host cookie, an allowed Origin, and the session CSRF token.
 
 ```powershell
 $body = @{
@@ -127,11 +127,11 @@ $body = @{
   durationMinutes = 30
 } | ConvertTo-Json
 
-Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/slots' `
-  -ContentType 'application/json' -Body $body
+# This is the request body. Publish it through the signed-in management page.
+# A standalone POST without the host session and CSRF token returns 401/403.
 ```
 
-This example creates a persistent slot; it is not automatically removed.
+Creating a slot through the management page persists it; it is not automatically removed.
 
 ### List available slots: GET /api/slots
 
@@ -198,15 +198,15 @@ Booking HTTP tests use mocked repositories and cover validation, confirmation, m
 
 ## Frontend booking flow
 
-Run the backend and frontend in separate terminals using the commands above, then open http://localhost:5173. If no slots exist, create a future slot using the POST /api/slots example. Booking from the page saves a real booking.
+Run the backend and frontend in separate terminals using the commands above, then open http://localhost:5173. If no slots exist, open Host access, sign in, and publish a future slot. Booking from the public page saves a real booking.
 
-`BookingPage` owns availability, the selected slot, form details, loading/error states, pending submission, and confirmation. `SlotPicker` groups slots by date in Europe/Skopje, `BookingForm` renders labelled fields with backend-matching limits, and `BookingConfirmation` displays the returned booking details. The API helper uses native fetch and `VITE_API_URL`; shared TypeScript types match the backend response shapes.
+`BookingPage` owns availability, the selected slot, form details, loading/error states, pending submission, and confirmation. `SlotPicker` groups slots by calendar date in Europe/Skopje, `BookingForm` renders labelled fields with backend-matching limits, and `BookingConfirmation` displays the returned booking details. The API helper uses native fetch and `VITE_API_URL`; shared TypeScript types match the backend response shapes.
 
-Availability can be refreshed or retried. Submission disables the form while pending. A 409 clears the selection, preserves details, and refreshes the list; other request failures preserve input too. Successful booking shows confirmation and refreshes availability. Form details live only in React memory and are lost on a page reload. This step uses a simple responsive list, without a calendar or ticking clock.
+The booking flow shows date/time selection first, then the details form with a session summary and a Back action. Back preserves entered details. Availability can be refreshed or retried. Submission disables the form while pending. A 409 clears the selection, preserves details, and refreshes the calendar; other request failures preserve input too. Successful booking replaces the previous steps with confirmation and refreshes availability. **Book another session** resets the details and returns to selection. Focus moves between steps and to submission errors. Form details live only in React memory and are lost on a page reload.
 
-## Shared demo availability management
+## Host availability management
 
-Use the navigation links **Book a session** (`#book`) and **Manage availability** (`#manage`). The management page is shared and has no login or accounts, matching this demo. Changing pages unmounts the previous page, so unsent form input is not retained across navigation.
+Use **Book a session** (`#booking-panel`) for public booking and **Host access** (`#manage`) for management. The wordmark returns to the hero (`#book`); **How it works** links to the explanatory section. Management requires the single host password. Visitors can book without logging in. There is no registration, users table, or visitor account system. Changing pages unmounts the previous page, so unsent form input is not retained across navigation.
 
 Enter a date, start time, and integer duration from 1 to 480 minutes. The scheduling timezone is always **Europe/Skopje**, independent of the browser's timezone. The page also displays the browser's timezone for clarity. Dates must resolve to a future instant. Creation uses the existing POST /api/slots endpoint, disables the form while pending, displays the returned slot, and refreshes GET /api/slots. Input is preserved on request failure. Availability has loading, empty, error, refresh, and retry states.
 
@@ -214,7 +214,7 @@ The focused `@js-temporal/polyfill` dependency provides explicit IANA-timezone c
 
 For example, under the timezone rules currently supplied by the runtime, `2027-10-31 02:30` in Skopje occurs twice: the choices correspond to `00:30Z` and `01:30Z`. A time of `2027-03-28 02:30` does not exist and is blocked.
 
-The page lists only future **available** slots, not a complete booked schedule, and shows no attendee details. No bookings-list endpoint, overlap prevention, ticking clock, or integrations are included.
+The page lists only future **available** slots, not a complete booked schedule, and shows no attendee details. No bookings-list endpoint, overlap prevention, or integrations are included.
 
 Frontend checks (Node.js 24):
 
@@ -226,3 +226,39 @@ npm run test:timezone
 ```
 
 The timezone tests use Node's built-in test runner and cover winter/summer conversion, skipped and repeated times, invalid input, and the future-time check. They can also be run with the process `TZ` set to another timezone to verify conversion independence, without changing system settings.
+
+## Single-host access
+
+Configure this locally; never paste the password or hash into chat or tracked files:
+
+```powershell
+cd backend
+npm run build
+npm run host:password
+```
+
+The helper prompts twice with hidden input (12–256 characters). Copy its generated `HOST_PASSWORD_HASH='...'` line directly into the ignored `backend/.env`, preserving your existing database settings. Only the salted scrypt hash is configured; the plaintext password is not stored. The hash format fixes scrypt at N=32768, r=8, p=3 and a 64-byte key. Restart the backend after setting/changing it. Missing or malformed configuration leaves host login unavailable (503) and slot creation protected; public booking still works. The example env file deliberately leaves this value blank. Do not use any `VITE_` variable for authentication secrets.
+
+Open Host access, sign in, publish slots, and use **Log out** when finished. `GET /api/host/session` returns login status, a CSRF token, and expiry with `Cache-Control: no-store`. Anonymous CSRF sessions last ten minutes; a successful `POST /api/host/login` verifies the password hash with Node's async scrypt and a timing-safe comparison, rotates the opaque session cookie and CSRF token, and starts a fixed one-hour session. Password input is cleared after attempts; the frontend keeps CSRF state only in memory, not localStorage. No password or password hash is returned by the API.
+
+The cookie is HttpOnly, SameSite=Lax, host-only, and path `/`, with a one-hour maximum age after login. In `NODE_ENV=production` it is also Secure and uses the `__Host-` prefix. The server checks expiry independently of cookie expiry. Logout validates CSRF, destroys the server session, and expires the cookie. Restarting the backend invalidates all sessions.
+
+`HostAuthGuard` protects POST /api/slots. Unauthorized requests return 401 before reaching slot persistence. Authenticated creation, login, and logout require the session's synchronizer token in `X-CSRF-Token` and an exact Origin match with `FRONTEND_ORIGIN`; failures return 403. Login itself obtains its CSRF token from the anonymous session first. Cookies use `credentials: include`, and CORS permits credentials only for the configured frontend origin. GET /api/slots, POST /api/bookings, and health endpoints remain public.
+
+Login is limited to five attempts per remote IP per fifteen minutes (including successful attempts), across cookies. Limits use the socket address, ignoring untrusted X-Forwarded-For. Rejected attempts return 429 with Retry-After; at most two password verifications run concurrently. Session and rate-limit maps are bounded and expired entries are cleaned up.
+
+For deployment, use HTTPS and `NODE_ENV=production`, set the host hash through backend secrets, and set `FRONTEND_ORIGIN` to the frontend's exact origin. Frontend/API must be same-site (for example, one origin via a reverse proxy or HTTPS sibling subdomains) for the SameSite cookie; unrelated frontend/backend hosting domains will not support host login with this setup. Do not weaken cookie or CSRF settings to work around that. For this single-process demo, sessions and rate limits are in memory and reset on restart. Multiple backend instances require a shared session/rate-limit store. Behind a proxy, clients share the socket-IP limit until proxy trust/edge rate limiting is explicitly configured for the deployment. No server or database settings are changed automatically.
+
+Backend tests use mocked repositories, a test-only password hash, and cookie-aware HTTP agents. They cover authorization, CSRF on login and host writes, password failures, rotation, expiration, logout invalidation, production cookie attributes, rate limiting, and missing configuration without needing PostgreSQL.
+
+## Calendar and visual design
+
+The booking and host pages share near-black backgrounds, warm off-white text, electric lavender, and restrained yellow accents through ordinary CSS. Shared palette variables and control styles live in `index.css`; `landing/landing.css` contains the approved header and hero composition. Space Grotesk loads through Google Fonts with system fallbacks. Layouts stack on mobile. No UI framework or animation library is used.
+
+`SiteHeader` provides navigation, `Hero` introduces the consultation and explains how it works, and `WorkflowGraphic` uses decorative CSS blocks that separate and settle in under five seconds. Reduced-motion preferences disable that animation and control transitions.
+
+`MonthCalendar` renders Monday-first months and previous/next controls. Only dates with API-provided slots are enabled; Tab and Enter work on native buttons, and arrow keys/Home/End move focus among available dates in the displayed month. `SlotPicker` owns the chosen date and displays time buttons with durations. Choosing a time opens the details step; changing the date or month clears time selection. Refresh reloads availability, and booking success and 409 conflicts clear the selected slot. Repeated DST times display their offsets to distinguish occurrences within Europe/Skopje.
+
+`calendar.ts` provides timezone-aware date keys and date-only month arithmetic using the existing Temporal dependency. `LiveClock` displays ticking time in Europe/Skopje, independently of booking state. Its one-second interval is cleared on unmount, and its changing content is not a live announcement region.
+
+Run the focused calendar checks from `frontend` with `node --test tests/calendar.test.mjs`, alongside the build, lint, and existing timezone checks. They cover Skopje date boundaries, repeated autumn times, leap-year month cells, and year-boundary navigation.

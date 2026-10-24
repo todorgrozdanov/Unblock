@@ -1,44 +1,83 @@
+import { useState } from 'react'
 import type { Slot } from './types'
-import { slotDate, slotTime } from './time'
+import { slotTime } from './time'
+import { dateLabel, slotDateKey } from './calendar'
+import { MonthCalendar } from './MonthCalendar'
+
 interface Props {
   slots: Slot[]
   selectedId: string
   disabled: boolean
   onSelect: (id: string) => void
 }
+
 export function SlotPicker({ slots, selectedId, disabled, onSelect }: Props) {
-  const groups = new Map<string, Slot[]>()
-  for (const slot of [...slots].sort(
+  const ordered = [...slots].sort(
     (a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt),
-  )) {
-    const date = slotDate(slot.startsAt)
-    groups.set(date, [...(groups.get(date) ?? []), slot])
-  }
+  )
+  const initialSlot =
+    ordered.find((slot) => slot.id === selectedId) ?? ordered[0]
+  const [selectedDate, setSelectedDate] = useState(() =>
+    initialSlot ? slotDateKey(initialSlot.startsAt) : '',
+  )
+  const availableDates = new Set(
+    ordered.map((slot) => slotDateKey(slot.startsAt)),
+  )
+  const dateSlots = ordered.filter(
+    (slot) => slotDateKey(slot.startsAt) === selectedDate,
+  )
+  const offset = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Skopje',
+    timeZoneName: 'shortOffset',
+  })
+
   return (
-    <fieldset disabled={disabled}>
-      <legend>Choose one slot</legend>
-      <p className="muted">All dates and times are shown in Europe/Skopje.</p>
-      {[...groups].map(([date, group]) => (
-        <section key={date}>
-          <h3>{date}</h3>
-          <div className="slot-options">
-            {group.map((slot) => (
-              <label key={slot.id} className="slot-option">
-                <input
-                  type="radio"
-                  name="slot"
-                  value={slot.id}
-                  checked={slot.id === selectedId}
-                  onChange={() => onSelect(slot.id)}
-                />
-                <span>
-                  {slotTime(slot.startsAt)} · {slot.durationMinutes} minutes
-                </span>
-              </label>
-            ))}
-          </div>
-        </section>
-      ))}
-    </fieldset>
+    <div className="slot-picker">
+      <p className="timezone-note">
+        All sessions are scheduled in <strong>Europe/Skopje</strong>.
+      </p>
+      <MonthCalendar
+        availableDates={availableDates}
+        selectedDate={selectedDate}
+        initialDate={selectedDate}
+        disabled={disabled}
+        onSelectDate={(date) => {
+          setSelectedDate(date)
+          onSelect('')
+        }}
+      />
+      <fieldset className="time-picker" disabled={disabled}>
+        <legend>
+          {selectedDate ? dateLabel(selectedDate) : 'Choose an available date'}
+        </legend>
+        <div className="time-options">
+          {dateSlots.map((slot) => (
+            <button
+              type="button"
+              className="time-option"
+              key={slot.id}
+              aria-pressed={slot.id === selectedId}
+              onClick={() => onSelect(slot.id)}
+            >
+              <span>{slotTime(slot.startsAt)}</span>
+              <small>{slot.durationMinutes} min</small>
+              {dateSlots.some(
+                (other) =>
+                  other.id !== slot.id &&
+                  slotTime(other.startsAt) === slotTime(slot.startsAt),
+              ) && (
+                <small>
+                  {
+                    offset
+                      .formatToParts(new Date(slot.startsAt))
+                      .find((part) => part.type === 'timeZoneName')?.value
+                  }
+                </small>
+              )}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+    </div>
   )
 }

@@ -9,7 +9,13 @@ import {
 } from './scheduling'
 import type { TimeOption } from './scheduling'
 
-export function AvailabilityPage() {
+export function AvailabilityPage({
+  csrfToken,
+  onSessionExpired,
+}: {
+  csrfToken: string
+  onSessionExpired: () => void
+}) {
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
@@ -84,7 +90,12 @@ export function AvailabilityPage() {
     setPending(true)
     setCreated(null)
     try {
-      const result = await createSlot(instant, minutes, controller.signal)
+      const result = await createSlot(
+        instant,
+        minutes,
+        controller.signal,
+        csrfToken,
+      )
       if (controller.signal.aborted) return
       setCreated(result)
       setDate('')
@@ -92,6 +103,14 @@ export function AvailabilityPage() {
       setOccurrence('')
       refreshSlots()
     } catch (failure) {
+      if (
+        !controller.signal.aborted &&
+        failure instanceof ApiError &&
+        failure.status === 401
+      ) {
+        onSessionExpired()
+        return
+      }
       if (!controller.signal.aborted)
         setError(
           failure instanceof ApiError
@@ -105,24 +124,32 @@ export function AvailabilityPage() {
   }
 
   return (
-    <main>
-      <header>
-        <h1>Manage availability</h1>
+    <main className="host-page">
+      <header className="host-hero">
+        <p className="eyebrow">HOST WORKSPACE / AVAILABILITY</p>
+        <h1 id="host-title" tabIndex={-1}>
+          Your time,
+          <br />
+          <span>made available.</span>
+        </h1>
         <p>
-          <strong>Shared demo management page</strong> — no login or accounts.
+          <strong>Single-host management page</strong> — password-protected. No
+          visitor accounts.
         </p>
         <p>
           Scheduling timezone: <strong>{schedulingTimezone}</strong>. All
           entered dates and times use this timezone.
         </p>
       </header>
-      <p className="muted">
+      <p className="muted device-timezone">
         Your browser timezone is {browserTimezone}. Scheduling still uses{' '}
         {schedulingTimezone}.
       </p>
-      <div className="booking-layout">
+      <div className="booking-layout host-layout">
         <section aria-labelledby="create-slot-title">
-          <h2 id="create-slot-title">Add an available slot</h2>
+          <h2 id="create-slot-title" className="step-heading">
+            <span>01</span> Publish a slot
+          </h2>
           <form
             onSubmit={(event) => {
               event.preventDefault()
@@ -181,17 +208,11 @@ export function AvailabilityPage() {
                     {options.map((option, index) => (
                       <option key={option.instant} value={option.instant}>
                         {index === 0 ? 'First' : 'Second'} occurrence (UTC
-                        {option.offset}) — {option.instant}
+                        {option.offset})
                       </option>
                     ))}
                   </select>
                 </>
-              )}
-              {instant && (
-                <p className="muted">
-                  Exact timestamp to send:{' '}
-                  <time dateTime={instant}>{instant}</time>
-                </p>
               )}
               <label htmlFor="slot-duration">Duration in minutes</label>
               <input
@@ -205,7 +226,8 @@ export function AvailabilityPage() {
                 onChange={(event) => setDuration(event.target.value)}
               />
               <button type="submit" disabled={pending || !!timeError}>
-                {pending ? 'Creating…' : 'Create slot'}
+                {pending ? 'Publishing…' : 'Publish slot'}{' '}
+                <span aria-hidden="true">↗</span>
               </button>
             </fieldset>
           </form>
@@ -226,7 +248,9 @@ export function AvailabilityPage() {
           aria-labelledby="host-slots-title"
           aria-busy={loadState === 'loading'}
         >
-          <h2 id="host-slots-title">Future available slots</h2>
+          <h2 id="host-slots-title" className="step-heading">
+            <span>02</span> Future available slots
+          </h2>
           <p>
             This list shows only unbooked slots, not a complete booked schedule.
             It contains no attendee details.
@@ -240,7 +264,15 @@ export function AvailabilityPage() {
             </p>
           )}
           {loadState === 'ready' && slots.length === 0 && (
-            <p role="status">No future available slots yet.</p>
+            <div role="status" className="notice">
+              <div>
+                <h3>Make the first opening.</h3>
+                <p>
+                  No future available slots yet. Publish a time to make it
+                  available for public booking.
+                </p>
+              </div>
+            </div>
           )}
           {loadState === 'ready' && slots.length > 0 && (
             <ul className="availability-list">

@@ -1,6 +1,7 @@
 import { BookingPage } from './booking/BookingPage'
 import { useEffect, useState } from 'react'
-import { AvailabilityPage } from './host/AvailabilityPage'
+import { HostPage } from './host/HostPage'
+import { SiteHeader } from './landing/SiteHeader'
 
 export default function App() {
   const [page, setPage] = useState(
@@ -12,17 +13,16 @@ export default function App() {
     window.addEventListener('hashchange', onNavigation)
     return () => window.removeEventListener('hashchange', onNavigation)
   }, [])
+  // A section link from the host page must wait for the public page to mount.
+  useEffect(() => {
+    if (page !== 'book') return
+    const target = window.location.hash.slice(1)
+    if (target) document.getElementById(target)?.scrollIntoView()
+  }, [page])
   return (
     <>
-      <nav className="page-navigation" aria-label="Main navigation">
-        <a href="#book" aria-current={page === 'book' ? 'page' : undefined}>
-          Book a session
-        </a>
-        <a href="#manage" aria-current={page === 'manage' ? 'page' : undefined}>
-          Manage availability
-        </a>
-      </nav>
-      {page === 'manage' ? <AvailabilityPage /> : <BookingPage />}
+      <SiteHeader managing={page === 'manage'} />
+      {page === 'manage' ? <HostPage /> : <BookingPage />}
     </>
   )
 }
