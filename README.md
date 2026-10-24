@@ -107,3 +107,40 @@ The first migration creates `public.slots` and `public.bookings`, using PostgreS
 For deployment, build the backend including `dist/database`, install runtime dependencies, provide the backend environment variables, and run `npm run migration:show` followed by `npm run migration:run` once as a controlled deployment step before starting the application. Use the deployment's PostgreSQL target explicitly and back up existing data first. Do not run migrations concurrently from multiple instances. Production migration commands work without TypeScript or Nest CLI because they execute compiled JavaScript with the runtime TypeORM dependency.
 
 `npm run migration:revert` invokes the most recent migration's `down` method. **The initial down method drops bookings and slots and deletes their data.** It is documented for deliberate rollback only; it was not run during setup. Never use it to reset a database containing data you need. Editing an entity alone does not update existing tables while synchronization is disabled; future schema changes require a new reviewed migration.
+
+## Slots API
+
+Start the backend with `npm run start:dev` from `backend`. The existing greeting and health endpoints are unchanged.
+
+### Create a slot: POST /api/slots
+
+Send JSON containing exactly `startsAt` and `durationMinutes`:
+
+- `startsAt`: a valid ISO 8601 date-time with an explicit timezone (`Z` or a numeric offset such as `+02:00`), strictly in the future when processed by the backend.
+- `durationMinutes`: a JSON integer from 1 through 480. Numeric strings are rejected.
+
+Missing, invalid, past-date, and unexpected properties return HTTP 400. Successful creation returns HTTP 201 with `id`, `startsAt`, `durationMinutes`, and `createdAt`. Dates are serialized in UTC. There is no overlap prevention in this step, and these endpoints do not yet require authentication.
+
+```powershell
+$body = @{
+  startsAt = (Get-Date).ToUniversalTime().AddDays(1).ToString('o')
+  durationMinutes = 30
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/slots' `
+  -ContentType 'application/json' -Body $body
+```
+
+This example creates a persistent slot; it is not automatically removed.
+
+### List available slots: GET /api/slots
+
+Returns HTTP 200 with an array of future slots that have no booking, sorted by `startsAt` ascending. Each result contains only `id`, `startsAt`, `durationMinutes`, and `createdAt`; booking names and emails are never selected. Returns `[]` when no slots are available.
+
+```powershell
+Invoke-RestMethod -Method Get -Uri 'http://localhost:3000/api/slots'
+```
+
+`CreateSlotDto` defines accepted input. A shared global ValidationPipe validates it and rejects unknown properties. The controller delegates to `SlotsService`, which checks the future date and uses the injected TypeORM Slot repository. Listing uses a parameterized future cutoff and a `NOT EXISTS` booking subquery. The schema and migrations remain unchanged.
+
+The automated slots HTTP tests replace the repository, and the SQL-generation test builds TypeORM metadata without connecting to PostgreSQL. They do not require the local database. A separate real-database verification can create identified test records, check persistence and availability, and delete only those specific records afterward.
