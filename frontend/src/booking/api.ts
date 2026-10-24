@@ -29,6 +29,17 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
 }
 export const getSlots = (signal: AbortSignal) =>
   request<Slot[]>('/api/slots', { signal })
+export const createSlot = (
+  startsAt: string,
+  durationMinutes: number,
+  signal: AbortSignal,
+) =>
+  request<Slot>('/api/slots', {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ startsAt, durationMinutes }),
+  })
 export const createBooking = (
   slotId: string,
   details: BookingDetails,

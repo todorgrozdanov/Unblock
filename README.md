@@ -203,3 +203,26 @@ Run the backend and frontend in separate terminals using the commands above, the
 `BookingPage` owns availability, the selected slot, form details, loading/error states, pending submission, and confirmation. `SlotPicker` groups slots by date in Europe/Skopje, `BookingForm` renders labelled fields with backend-matching limits, and `BookingConfirmation` displays the returned booking details. The API helper uses native fetch and `VITE_API_URL`; shared TypeScript types match the backend response shapes.
 
 Availability can be refreshed or retried. Submission disables the form while pending. A 409 clears the selection, preserves details, and refreshes the list; other request failures preserve input too. Successful booking shows confirmation and refreshes availability. Form details live only in React memory and are lost on a page reload. This step uses a simple responsive list, without a calendar or ticking clock.
+
+## Shared demo availability management
+
+Use the navigation links **Book a session** (`#book`) and **Manage availability** (`#manage`). The management page is shared and has no login or accounts, matching this demo. Changing pages unmounts the previous page, so unsent form input is not retained across navigation.
+
+Enter a date, start time, and integer duration from 1 to 480 minutes. The scheduling timezone is always **Europe/Skopje**, independent of the browser's timezone. The page also displays the browser's timezone for clarity. Dates must resolve to a future instant. Creation uses the existing POST /api/slots endpoint, disables the form while pending, displays the returned slot, and refreshes GET /api/slots. Input is preserved on request failure. Availability has loading, empty, error, refresh, and retry states.
+
+The focused `@js-temporal/polyfill` dependency provides explicit IANA-timezone conversion and daylight-saving disambiguation. `getTimeOptions` interprets a local date/time in Europe/Skopje and compares the earlier and later interpretations with the entered wall-clock time. A skipped spring-forward time is rejected. A repeated autumn time requires choosing the first or second occurrence, labelled with its actual UTC offset and exact instant. The selected instant is sent as an ISO UTC timestamp ending in `Z`; offsets are calculated from timezone rules rather than hardcoded. The browser's default timezone is never used to interpret the scheduling fields.
+
+For example, under the timezone rules currently supplied by the runtime, `2027-10-31 02:30` in Skopje occurs twice: the choices correspond to `00:30Z` and `01:30Z`. A time of `2027-03-28 02:30` does not exist and is blocked.
+
+The page lists only future **available** slots, not a complete booked schedule, and shows no attendee details. No bookings-list endpoint, overlap prevention, ticking clock, or integrations are included.
+
+Frontend checks (Node.js 24):
+
+```powershell
+cd frontend
+npm run build
+npm run lint
+npm run test:timezone
+```
+
+The timezone tests use Node's built-in test runner and cover winter/summer conversion, skipped and repeated times, invalid input, and the future-time check. They can also be run with the process `TZ` set to another timezone to verify conversion independence, without changing system settings.

@@ -55,6 +55,7 @@ form label {
   margin: 16px 0 6px;
 }
 input:not([type='radio']),
+select,
 textarea {
   width: 100%;
   border: 1px solid #64748b;
@@ -145,4 +146,30 @@ small {
   main {
     padding: 24px 16px;
   }
+}
+.page-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-width: 1100px;
+  margin: auto;
+  padding: 24px 24px 0;
+}
+.page-navigation a {
+  color: #1e40af;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.page-navigation a[aria-current='page'] {
+  background: #dbeafe;
+  font-weight: 700;
+}
+.availability-list {
+  padding-left: 20px;
+}
+.availability-list li {
+  margin: 16px 0;
+}
+time {
+  overflow-wrap: anywhere;
 }
