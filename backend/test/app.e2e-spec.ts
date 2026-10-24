@@ -5,6 +5,7 @@ import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { Slot } from '../src/database/entities/slot.entity.js';
+import { Booking } from '../src/database/entities/booking.entity.js';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -18,6 +19,8 @@ describe('AppController (e2e)', () => {
       .overrideProvider(getDataSourceToken())
       .useValue(database)
       .overrideProvider(getRepositoryToken(Slot))
+      .useValue({})
+      .overrideProvider(getRepositoryToken(Booking))
       .useValue({})
       .compile();
 

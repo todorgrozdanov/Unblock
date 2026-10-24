@@ -144,3 +144,54 @@ Invoke-RestMethod -Method Get -Uri 'http://localhost:3000/api/slots'
 `CreateSlotDto` defines accepted input. A shared global ValidationPipe validates it and rejects unknown properties. The controller delegates to `SlotsService`, which checks the future date and uses the injected TypeORM Slot repository. Listing uses a parameterized future cutoff and a `NOT EXISTS` booking subquery. The schema and migrations remain unchanged.
 
 The automated slots HTTP tests replace the repository, and the SQL-generation test builds TypeORM metadata without connecting to PostgreSQL. They do not require the local database. A separate real-database verification can create identified test records, check persistence and availability, and delete only those specific records afterward.
+
+## Booking API
+
+### Create a booking: POST /api/bookings
+
+Send JSON with:
+
+- `slotId`: a valid UUID identifying an existing slot.
+- `name`: a string, trimmed before validation and storage, nonempty after trimming, maximum 100 characters.
+- `email`: a valid email address, maximum 254 characters.
+- `taskDescription`: optional string, maximum 2000 characters; omit it when not needed. Explicit `null` is rejected.
+
+Unknown properties, missing required fields, and invalid values return HTTP 400. A missing slot returns 404. A slot that has started or is already booked returns 409. Successful creation returns HTTP 201 with this explicit confirmation shape:
+
+```json
+{
+  "id": "booking-uuid",
+  "name": "Alex Example",
+  "email": "alex@example.com",
+  "taskDescription": "Automate a weekly report",
+  "slot": {
+    "id": "slot-uuid",
+    "startsAt": "2099-01-01T10:00:00.000Z",
+    "durationMinutes": 30
+  }
+}
+```
+
+If the description is omitted, the confirmation contains `taskDescription: null`. UUID labels in this response illustration are placeholders; actual IDs are UUIDs.
+
+PowerShell example using the first available slot (creates a persistent booking):
+
+```powershell
+$available = @(Invoke-RestMethod -Uri 'http://localhost:3000/api/slots')
+if ($available.Count -eq 0) { throw 'Create a future slot first.' }
+$body = @{
+  slotId = $available[0].id
+  name = 'Alex Example'
+  email = 'alex@example.com'
+  taskDescription = 'Automate a weekly report'
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/bookings' `
+  -ContentType 'application/json' -Body $body
+```
+
+The controller delegates to `BookingsService`. The service uses injected Slot and Booking repositories to check the slot, check availability, and save the booking to PostgreSQL. The preliminary check improves feedback but cannot prevent a race: two simultaneous requests can both see an available slot. The existing database UNIQUE constraint on `bookings.slotId` allows only one insert. The service recognizes SQLSTATE `23505` specifically for `UQ_bookings_slotId` and returns a friendly 409; unrelated save errors receive a generic 500 without SQL or internal details.
+
+Booked slots disappear from `GET /api/slots` through its existing `NOT EXISTS` filter. No public booking-list endpoint is provided. Authentication, overlap prevention, frontend changes, and external integrations are not part of this step. No schema changes or new migrations are required.
+
+Booking HTTP tests use mocked repositories and cover validation, confirmation, missing/started/booked slots, the specific uniqueness violation, and generic handling of other save failures. A separate real PostgreSQL check sends simultaneous HTTP requests for an identified temporary slot, verifies one 201 and one 409 plus exactly one stored booking and availability exclusion, then deletes that test booking before its test slot.
