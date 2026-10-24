@@ -6,6 +6,7 @@ import { Slot } from '../src/database/entities/slot.entity.js';
 import { SlotsModule } from '../src/slots/slots.module.js';
 import { createValidationPipe } from '../src/validation.js';
 import { HostAuthGuard } from '../src/host-auth/host-auth.guard.js';
+import { QueryFailedError } from 'typeorm';
 
 describe('Slots HTTP API (mocked repository)', () => {
   let app: INestApplication;
@@ -58,6 +59,33 @@ describe('Slots HTTP API (mocked repository)', () => {
       .post('/api/slots')
       .send({ startsAt, durationMinutes: 30 })
       .expect(201);
+  });
+
+  it('returns a helpful 409 for the specific database overlap constraint', async () => {
+    repository.save.mockRejectedValueOnce(new QueryFailedError(
+      'internal SQL that must not appear in the response', [],
+      Object.assign(new Error('private driver error'), { code: '23P01', constraint: 'EX_slots_no_overlap' }),
+    ));
+    const response = await request(app.getHttpServer()).post('/api/slots')
+      .send({ startsAt: future(), durationMinutes: 30 }).expect(409);
+    expect(response.body.message).toBe(
+      'That time overlaps an existing slot. Choose another start time or duration.',
+    );
+    expect(JSON.stringify(response.body)).not.toContain('internal SQL');
+    expect(JSON.stringify(response.body)).not.toContain('EX_slots');
+  });
+
+  it.each([
+    { code: '23P01', constraint: 'another_constraint' },
+    { code: '23505', constraint: 'EX_slots_no_overlap' },
+  ])('does not misclassify other database errors as overlaps: %j', async (driverError) => {
+    repository.save.mockRejectedValueOnce(new QueryFailedError(
+      'private query', [], Object.assign(new Error('private driver error'), driverError),
+    ));
+    const response = await request(app.getHttpServer()).post('/api/slots')
+      .send({ startsAt: future(), durationMinutes: 30 }).expect(500);
+    expect(response.body.message).toBe('Unable to create slot');
+    expect(JSON.stringify(response.body)).not.toContain('private query');
   });
 
   it.each([

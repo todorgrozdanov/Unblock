@@ -4,6 +4,7 @@ import type { DataSourceOptions } from 'typeorm';
 import { Booking } from './entities/booking.entity.js';
 import { Slot } from './entities/slot.entity.js';
 import { InitialSlotsAndBookings1792800000000 } from './migrations/1792800000000-InitialSlotsAndBookings.js';
+import { PreventOverlappingSlots1792890000000 } from './migrations/1792890000000-PreventOverlappingSlots.js';
 
 export function loadBackendEnvironment(): void {
   const envPath = fileURLToPath(new URL('../../.env', import.meta.url));
@@ -21,7 +22,7 @@ export function createDatabaseOptions(): DataSourceOptions {
     password: process.env.DB_PASSWORD,
     schema: 'public',
     entities: [Slot, Booking],
-    migrations: [InitialSlotsAndBookings1792800000000],
+    migrations: [InitialSlotsAndBookings1792800000000, PreventOverlappingSlots1792890000000],
     migrationsTableName: 'migrations',
     synchronize: false,
     migrationsRun: false,

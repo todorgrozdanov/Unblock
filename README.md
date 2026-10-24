@@ -104,6 +104,8 @@ Migration commands use the standalone `dist/database/data-source.js` and compile
 
 The first migration creates `public.slots` and `public.bookings`, using PostgreSQL's built-in `gen_random_uuid()` for IDs and `now()` for creation timestamps. Slots require a start time and a positive integer duration. Bookings require a name, email, and slot ID; task descriptions are nullable. A foreign key requires an existing slot and prevents deletion of booked slots. A UNIQUE constraint allows at most one booking per slot. There is no separate `isBooked` flag. TypeORM also maintains a `public.migrations` history table.
 
+The second migration, `PreventOverlappingSlots1792890000000`, adds the `EX_slots_no_overlap` PostgreSQL GiST exclusion constraint. It prevents any two slots from sharing time, including booked slots and concurrent inserts or updates. Each range includes its start and excludes its end: 10:00–11:00 and 11:00–11:30 are allowed. End times use UTC arithmetic so duration always means elapsed minutes, including across daylight-saving changes. No extra column or database extension is needed. The migration locks the slots table during its transaction, checks for existing overlaps, and aborts without modifying rows if it finds any. Resolve existing conflicts deliberately before retrying; never delete existing slots automatically.
+
 For deployment, build the backend including `dist/database`, install runtime dependencies, provide the backend environment variables, and run `npm run migration:show` followed by `npm run migration:run` once as a controlled deployment step before starting the application. Use the deployment's PostgreSQL target explicitly and back up existing data first. Do not run migrations concurrently from multiple instances. Production migration commands work without TypeScript or Nest CLI because they execute compiled JavaScript with the runtime TypeORM dependency.
 
 `npm run migration:revert` invokes the most recent migration's `down` method. **The initial down method drops bookings and slots and deletes their data.** It is documented for deliberate rollback only; it was not run during setup. Never use it to reset a database containing data you need. Editing an entity alone does not update existing tables while synchronization is disabled; future schema changes require a new reviewed migration.
@@ -119,7 +121,7 @@ Send JSON containing exactly `startsAt` and `durationMinutes`:
 - `startsAt`: a valid ISO 8601 date-time with an explicit timezone (`Z` or a numeric offset such as `+02:00`), strictly in the future when processed by the backend.
 - `durationMinutes`: a JSON integer from 1 through 480. Numeric strings are rejected.
 
-Missing, invalid, past-date, and unexpected properties return HTTP 400. Successful creation returns HTTP 201 with `id`, `startsAt`, `durationMinutes`, and `createdAt`. Dates are serialized in UTC. There is no overlap prevention in this step. GET /api/slots remains public; POST /api/slots now requires the host cookie, an allowed Origin, and the session CSRF token.
+Missing, invalid, past-date, and unexpected properties return HTTP 400. Successful creation returns HTTP 201 with `id`, `startsAt`, `durationMinutes`, and `createdAt`. Dates are serialized in UTC. A time overlapping any existing slot returns HTTP 409 with `That time overlaps an existing slot. Choose another start time or duration.` The host form preserves the entered date, time, and duration so they can be adjusted. Back-to-back slots are allowed. GET /api/slots remains public; POST /api/slots requires the host cookie, an allowed Origin, and the session CSRF token.
 
 ```powershell
 $body = @{
@@ -141,7 +143,7 @@ Returns HTTP 200 with an array of future slots that have no booking, sorted by `
 Invoke-RestMethod -Method Get -Uri 'http://localhost:3000/api/slots'
 ```
 
-`CreateSlotDto` defines accepted input. A shared global ValidationPipe validates it and rejects unknown properties. The controller delegates to `SlotsService`, which checks the future date and uses the injected TypeORM Slot repository. Listing uses a parameterized future cutoff and a `NOT EXISTS` booking subquery. The schema and migrations remain unchanged.
+`CreateSlotDto` defines accepted input. A shared global ValidationPipe validates it and rejects unknown properties. The controller delegates to `SlotsService`, which checks the future date and uses the injected TypeORM Slot repository. PostgreSQL enforces non-overlapping ranges; the service maps only error `23P01` from `EX_slots_no_overlap` to HTTP 409. Other save failures return a generic HTTP 500 without SQL or internal errors. Listing uses a parameterized future cutoff and a `NOT EXISTS` booking subquery.
 
 The automated slots HTTP tests replace the repository, and the SQL-generation test builds TypeORM metadata without connecting to PostgreSQL. They do not require the local database. A separate real-database verification can create identified test records, check persistence and availability, and delete only those specific records afterward.
 
@@ -192,7 +194,7 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/bookings' `
 
 The controller delegates to `BookingsService`. The service uses injected Slot and Booking repositories to check the slot, check availability, and save the booking to PostgreSQL. The preliminary check improves feedback but cannot prevent a race: two simultaneous requests can both see an available slot. The existing database UNIQUE constraint on `bookings.slotId` allows only one insert. The service recognizes SQLSTATE `23505` specifically for `UQ_bookings_slotId` and returns a friendly 409; unrelated save errors receive a generic 500 without SQL or internal details.
 
-Booked slots disappear from `GET /api/slots` through its existing `NOT EXISTS` filter. No public booking-list endpoint is provided. Authentication, overlap prevention, frontend changes, and external integrations are not part of this step. No schema changes or new migrations are required.
+Booked slots disappear from `GET /api/slots` through its existing `NOT EXISTS` filter. The UNIQUE constraint protects each slot from duplicate bookings; the separate slots exclusion constraint prevents the single host from publishing overlapping sessions. No public booking-list endpoint or external integrations are provided.
 
 Booking HTTP tests use mocked repositories and cover validation, confirmation, missing/started/booked slots, the specific uniqueness violation, and generic handling of other save failures. A separate real PostgreSQL check sends simultaneous HTTP requests for an identified temporary slot, verifies one 201 and one 409 plus exactly one stored booking and availability exclusion, then deletes that test booking before its test slot.
 
@@ -214,7 +216,7 @@ The focused `@js-temporal/polyfill` dependency provides explicit IANA-timezone c
 
 For example, under the timezone rules currently supplied by the runtime, `2027-10-31 02:30` in Skopje occurs twice: the choices correspond to `00:30Z` and `01:30Z`. A time of `2027-03-28 02:30` does not exist and is blocked.
 
-The page lists only future **available** slots, not a complete booked schedule, and shows no attendee details. No bookings-list endpoint, overlap prevention, or integrations are included.
+The page lists only future **available** slots, not a complete booked schedule, and shows no attendee details. Overlap prevention checks all slots at the database level, including booked slots hidden from this list. No bookings-list endpoint or integrations are included.
 
 Frontend checks (Node.js 24):
 

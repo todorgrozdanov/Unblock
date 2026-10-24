@@ -1,6 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { Slot } from '../database/entities/slot.entity.js';
 import { Booking } from '../database/entities/booking.entity.js';
 import type { CreateSlotDto } from './create-slot.dto.js';
@@ -15,7 +20,20 @@ export class SlotsService {
       throw new BadRequestException('startsAt must be in the future');
     }
     const slot = this.slots.create({ startsAt, durationMinutes: input.durationMinutes });
-    return this.slots.save(slot);
+    try {
+      // The database constraint handles overlaps, including concurrent inserts.
+      return await this.slots.save(slot);
+    } catch (error) {
+      const driverError = error instanceof QueryFailedError
+        ? error.driverError as { code?: string; constraint?: string }
+        : undefined;
+      if (driverError?.code === '23P01' && driverError.constraint === 'EX_slots_no_overlap') {
+        throw new ConflictException(
+          'That time overlaps an existing slot. Choose another start time or duration.',
+        );
+      }
+      throw new InternalServerErrorException('Unable to create slot');
+    }
   }
 
   findAvailable(): Promise<Slot[]> {
