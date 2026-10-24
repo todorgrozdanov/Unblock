@@ -3,14 +3,20 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
+import { getDataSourceToken } from '@nestjs/typeorm';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
+  const database = { query: vi.fn(), isInitialized: false };
 
   beforeEach(async () => {
+    database.query.mockReset().mockResolvedValue([{ '?column?': 1 }]);
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(getDataSourceToken())
+      .useValue(database)
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
@@ -28,6 +34,26 @@ describe('AppController (e2e)', () => {
       .get('/api/health')
       .expect(200)
       .expect({ status: 'ok', service: 'Unblock API' });
+  });
+
+  it('/api/health/database (GET) checks the database', async () => {
+    await request(app.getHttpServer())
+      .get('/api/health/database')
+      .expect(200)
+      .expect({ status: 'ok', database: 'connected' });
+    expect(database.query).toHaveBeenCalledWith('SELECT 1');
+  });
+
+  it('/api/health/database (GET) hides database errors', async () => {
+    database.query.mockRejectedValueOnce(new Error('Sensitive connection details'));
+    await request(app.getHttpServer())
+      .get('/api/health/database')
+      .expect(503)
+      .expect({
+        statusCode: 503,
+        message: 'Database is unavailable',
+        error: 'Service Unavailable',
+      });
   });
 
   afterEach(async () => {
