@@ -1,11 +1,9 @@
 import { NestFactory } from '@nestjs/core';
-import { existsSync } from 'node:fs';
 import { AppModule } from './app.module.js';
+import { loadBackendEnvironment } from './database/database.config.js';
 
 async function bootstrap() {
-  if (existsSync('.env')) {
-    process.loadEnvFile('.env');
-  }
+  loadBackendEnvironment();
 
   const app = await NestFactory.create(AppModule);
   app.enableCors({
