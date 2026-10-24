@@ -5,7 +5,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { CookieOptions, Request, Response } from 'express';
 import { isPasswordHash, verifyHostPassword } from './password.js';
 
@@ -27,6 +27,13 @@ export class HostAuthService {
   private readonly sessions = new Map<string, Session>();
   private readonly attempts = new Map<string, Attempts>();
   private activeVerifications = 0;
+  // Production supplies a separate secret; local sessions use a process-local key.
+  private readonly signingKey =
+    process.env.SESSION_SECRET || randomBytes(32).toString('hex');
+
+  private signature(id: string): string {
+    return createHmac('sha256', this.signingKey).update(id).digest('hex');
+  }
 
   private get secure(): boolean {
     return process.env.NODE_ENV === 'production';
@@ -55,8 +62,15 @@ export class HostAuthService {
       ?.split(';')
       .map((value) => value.trim())
       .find((value) => value.startsWith(`${this.cookieName}=`));
-    const id = cookie?.slice(this.cookieName.length + 1);
-    return id && /^[a-f0-9]{64}$/.test(id) ? id : undefined;
+    const value = cookie?.slice(this.cookieName.length + 1);
+    if (!value || !/^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(value)) return undefined;
+    const [id, signature] = value.split('.');
+    return timingSafeEqual(
+      Buffer.from(signature, 'hex'),
+      Buffer.from(this.signature(id), 'hex'),
+    )
+      ? id
+      : undefined;
   }
 
   private getSession(request: Request): Session | undefined {
@@ -79,7 +93,7 @@ export class HostAuthService {
     };
     const id = this.token();
     this.sessions.set(id, session);
-    response.cookie(this.cookieName, id, {
+    response.cookie(this.cookieName, `${id}.${this.signature(id)}`, {
       ...this.cookieOptions,
       maxAge: lifetime,
     });

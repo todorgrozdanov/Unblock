@@ -1,17 +1,15 @@
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 import { loadBackendEnvironment } from './database/database.config.js';
-import { createValidationPipe } from './validation.js';
+import { configureHttp, validateProductionEnvironment } from './production.js';
 
 async function bootstrap() {
   loadBackendEnvironment();
-
-  const app = await NestFactory.create(AppModule);
-  app.useGlobalPipes(createValidationPipe());
-  app.enableCors({
-    origin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
-    credentials: true,
-  });
-  await app.listen(process.env.PORT ?? 3000);
+  validateProductionEnvironment();
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  configureHttp(app);
+  app.enableShutdownHooks();
+  await app.listen(Number(process.env.PORT ?? 3000), '0.0.0.0');
 }
 await bootstrap();

@@ -6,7 +6,7 @@ Unblock is a single-host automation consultation scheduler built for the TeamLif
 - **Backend:** NestJS and TypeScript
 - **Database:** PostgreSQL, connected through TypeORM in the backend
 
-The frontend lists available consultation slots and submits bookings to the backend. Slot times and date groups use Europe/Skopje. `GET /api/health` checks the API process only, not database connectivity. The starter `GET /` endpoint still returns `Hello World!`.
+The frontend lists available consultation slots and submits bookings to the backend. Slot times and date groups use Europe/Skopje. `GET /api/health` checks the API process only, not database connectivity. The starter `GET /` endpoint returns `Hello World!` in backend-only development; the combined deployment serves React at `/` and the protected host interface at `/host`.
 
 ## Run locally
 
@@ -19,9 +19,9 @@ if (!(Test-Path frontend/.env)) { Copy-Item frontend/.env.example frontend/.env 
 if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
 ```
 
-The frontend uses `VITE_API_URL` (default `http://localhost:3000`). Vite loads `frontend/.env`; all `VITE_` variables are public browser configuration, so never store secrets in them.
+The frontend uses `VITE_API_URL` (development default `http://localhost:3000`, production default same origin). Vite loads `frontend/.env` only during development; production builds ignore frontend environment files. All `VITE_` variables are public browser configuration, so never store secrets in them.
 
-The backend loads `backend/.env` relative to its configuration module, using Node's built-in environment-file support. Existing process environment variables take precedence. `FRONTEND_ORIGIN` defaults to `http://localhost:5173` and must match the browser page's exact origin, with no trailing slash. `PORT` defaults to `3000`. Restart the affected development server after changing environment variables; frontend production values are set at build time. Real `.env` files are ignored by Git.
+In development, the backend loads `backend/.env` relative to its configuration module, using Node's built-in environment-file support. Existing process environment variables take precedence. Production never loads that local file: configure the provider environment or explicitly use Node's `--env-file` with a separate ignored production file. `FRONTEND_ORIGIN` defaults to `http://localhost:5173` and must match the browser page's exact origin, with no trailing slash. `PORT` defaults to `3000`. Restart the affected development server after changing environment variables; frontend production values are set at build time. Real `.env` files are ignored by Git.
 
 Terminal 1 — frontend:
 
@@ -100,7 +100,7 @@ npm run migration:run
 npm run migration:show
 ```
 
-Migration commands use the standalone `dist/database/data-source.js` and compiled ESM JavaScript, not a TypeScript runtime loader. Rebuild after changing any entity or migration. NestJS and the migration DataSource share connection settings, entities, and migrations. Both load `backend/.env` relative to the configuration module before reading settings; existing process environment values take precedence. Keep passwords only in local `.env` or backend deployment secrets.
+Migration commands use the standalone `dist/database/data-source.js` and compiled ESM JavaScript, not a TypeScript runtime loader. Rebuild after changing any entity or migration. NestJS and the migration DataSource share connection settings, entities, and migrations. During development both load `backend/.env` relative to the configuration module before reading settings; production uses only explicitly supplied environment variables. Keep passwords only in ignored environment files or backend deployment secrets.
 
 The first migration creates `public.slots` and `public.bookings`, using PostgreSQL's built-in `gen_random_uuid()` for IDs and `now()` for creation timestamps. Slots require a start time and a positive integer duration. Bookings require a name, email, and slot ID; task descriptions are nullable. A foreign key requires an existing slot and prevents deletion of booked slots. A UNIQUE constraint allows at most one booking per slot. There is no separate `isBooked` flag. TypeORM also maintains a `public.migrations` history table.
 
@@ -210,7 +210,7 @@ The booking flow shows date/time selection first, then the details form with a s
 
 ## Host availability management
 
-Use **Book a session** (`#booking-panel`) for public booking and **Host access** (`#manage`) for management. The wordmark returns to the hero (`#book`); **How it works** links to the explanatory section. Management requires the single host password. Visitors can book without logging in. There is no registration, users table, or visitor account system. Changing pages unmounts the previous page, so unsent form input is not retained across navigation.
+Use **Book a session** (`/#booking-panel`) for public booking and **Host access** (`/host`) for management. The legacy `/#manage` link still works. The wordmark returns to the hero (`/#book`); **How it works** links to the explanatory section. Management requires the single host password. Visitors can book without logging in. There is no registration, users table, or visitor account system. Changing pages unmounts the previous page, so unsent form input is not retained across navigation.
 
 Enter a date, start time, and integer duration from 1 to 480 minutes. The scheduling timezone is always **Europe/Skopje**, independent of the browser's timezone. The page also displays the browser's timezone for clarity. Dates must resolve to a future instant. Creation uses the existing POST /api/slots endpoint, disables the form while pending, displays the returned slot, and refreshes GET /api/slots. Input is preserved on request failure. Availability has loading, empty, error, refresh, and retry states.
 
@@ -318,3 +318,128 @@ Public `POST /api/bookings` is limited to 10 attempts per socket IP per 15 minut
 ### Verification
 
 Both backend Vitest configurations load `test/gemini.mock.ts`, replacing the SDK for **every automated test**, even if a real key exists locally. AI unit and HTTP tests cover valid generation, missing configuration, timeouts/errors, unsafe or empty output, fallback, save-before-generation, successful booking despite AI failure, no generation on invalid/conflicting bookings, host authentication/CSRF, validation, and request limits. They require neither Google access nor PostgreSQL. Run `npm test` and `npm run test:e2e` from `backend`, plus both builds, frontend lint, and the existing frontend timezone/calendar tests. A successful `npm run ai:check` is a separate, explicitly requested live-provider check; passing mocked tests does not prove a key/model is available to your project.
+
+## Public demo and deployment
+
+**Deployment status:** prepared locally; no public URL has been verified yet. Replace this status with the actual URL only after HTTPS checks pass. Google Calendar integration is intentionally deferred.
+
+### Architecture and no-cost limits
+
+The proposed demo uses one **Render Free web service** in Frankfurt and one separate **Neon Free PostgreSQL project** in the closest available region. These are among the providers suggested by TeamLift. No local database contents are uploaded, and the local PostgreSQL server is never exposed.
+
+```text
+Browser --HTTPS--> Render (one NestJS process)
+                     |-- / and /host: built React app
+                     |-- /assets/*: built CSS/JavaScript
+                     |-- /api/*: NestJS controllers
+                     |-- verified TLS --> dedicated Neon PostgreSQL
+                     `-- optional HTTPS --> Gemini (timing only)
+```
+
+Render terminates HTTPS and forwards requests to the app, which listens on `0.0.0.0` and the platform's `PORT`. React calls relative `/api` URLs; no production backend URL or secret is compiled into the frontend. Only `/`, `/host`, and `/host/` receive the SPA fallback. Unknown APIs, missing assets, environment paths, and other unknown routes remain 404 responses. The development API greeting is preserved when `SERVE_FRONTEND=false`.
+
+Checked 24 October 2026: [Render Free](https://render.com/docs/free) sleeps after 15 minutes idle, takes about a minute to wake, and provides 750 service hours per workspace/month. Builds and bandwidth have account allowances; without a payment method, excess usage suspends service/builds rather than purchasing more. Free services can restart and have no persistent disk, shell, one-off jobs, or scaling. Monitor the dashboard allowances; do not add payment details. Render's free Postgres expires after 30 days, so it is not used here.
+
+[Neon's current pricing](https://neon.com/pricing) lists Free at $0 with no credit card or time limit, 100 CU-hours/month/project and 1 GB storage/project; confirm the current dashboard limits before creating resources, because older documentation lists smaller storage allowances. Its [free compute scales to zero](https://neon.com/docs/introduction/scale-to-zero) after five minutes idle and resumes on connection. Sleep/wake adds latency. Database rows live in Neon independently of app restarts. Neither free service is an uptime guarantee or a substitute for a production backup plan.
+
+**AI limitation:** the local Gemini integration is implemented and live-tested, but [Google's terms](https://ai.google.dev/gemini-api/terms) require Paid Services for API clients offered to EEA/Swiss/UK users. For a broadly accessible demo without billing, leave production `GEMINI_API_KEY` unset and use the deterministic confirmation fallback. This does not disable local AI. Public live AI verification remains pending until the account/use terms are resolved; do not label fallback as AI-generated or enable billing automatically.
+
+### Reproducible build and runtime
+
+Node is pinned in `.node-version` to the locally verified 24.15.0. Run from the repository root:
+
+```powershell
+# Existing dependencies: build both apps without changing your local .env files.
+node scripts/build.mjs
+
+# Clean deployment install/build; --prune removes backend development dependencies.
+# This second command is for the deployment environment, not daily development.
+node scripts/build.mjs --install --prune
+```
+
+Each application retains its own npm lockfile; `--install` uses `npm ci --include=dev` so TypeScript/Vite/Nest build tools are available even with `NODE_ENV=production`. Frontend environment files are disabled for production builds, and the root script explicitly sets the public API base to the current origin. Only the backend dependency tree is needed at runtime. Local Vite and Nest watch commands above remain unchanged.
+
+The runtime command is `node scripts/start.mjs`, or with an explicitly prepared production environment file:
+
+```powershell
+node --env-file=backend/.env.production scripts/start.mjs
+```
+
+The script starts compiled JavaScript, not the Nest CLI. It runs no migrations. Production startup requires an exact HTTPS origin, verified database TLS, a valid host hash, and a random session secret. Graceful shutdown hooks close the database connection pool.
+
+### Production settings and private credential setup
+
+First build, then run this **yourself in a private local terminal**:
+
+```powershell
+node scripts/prepare-production-env.mjs
+```
+
+It asks for a new production host password with hidden input and creates ignored `backend/.env.production` from the safe example. It writes the scrypt hash and a fresh cryptographically random `SESSION_SECRET` directly to that file without printing either. It refuses to overwrite an existing file. Choose a password different from local development. Open the file privately to complete the remaining settings and transfer values directly to Render's environment dashboard. Never paste the file or values into chat, commit it, screenshot it, or copy the entire development `.env`.
+
+| Variable | Production setting |
+| --- | --- |
+| `NODE_ENV` | `production` |
+| `SERVE_FRONTEND` | `true` |
+| `PORT` | Provided by Render; do not override it |
+| `FRONTEND_ORIGIN` | Actual assigned `https://...onrender.com` origin, no path or trailing slash |
+| `DB_HOST` | Neon **direct**, non-pooled hostname, without a URL scheme or credentials |
+| `DB_PORT` | `5432` |
+| `DB_NAME` | New dedicated `unblock` database |
+| `DB_USER` | Dedicated production role owning that database, such as `unblock_app` |
+| `DB_PASSWORD` | That role's production password, entered privately |
+| `DB_SSL` | `true`; Node verifies the public CA chain and hostname |
+| `HOST_PASSWORD_HASH` | New production hash from the local helper; paste only the value, without .env quotes |
+| `SESSION_SECRET` | New 64-character hexadecimal value from the local helper |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` |
+| `GEMINI_API_KEY` | Unset for the no-billing public demo pending Google's regional terms |
+
+No `DATABASE_URL` is used; split the Neon connection information into the actual `DB_*` names above. No production secret uses a `VITE_` prefix. TLS uses `ssl: { rejectUnauthorized: true }` and Node's trusted public certificates, as supported by [Neon's verified TLS connections](https://neon.com/docs/connect/connect-securely). Never set `NODE_TLS_REJECT_UNAUTHORIZED=0` or `rejectUnauthorized:false`. The pool is limited to three connections, with short idle timeouts.
+
+Host cookies are signed with HMAC-SHA256 using `SESSION_SECRET` and still contain only an opaque random session ID plus its signature. They are HttpOnly, Secure in production, SameSite=Lax, host-only, and expire after one hour. Every privileged write still requires the server-side session, exact configured Origin, and synchronizer CSRF token. Signing is not a replacement for those checks. Local development uses a process-local signing key if none is configured. This update invalidates previously issued cookies; sign in again.
+
+**Single-instance limitation:** sessions, login/booking/generation counters, and AI concurrency limits are in memory. Run exactly one process/instance, without PM2 clustering. Sleep, restart, or redeploy signs hosts out and resets counters, but does not delete database records. `trust proxy` deliberately remains `false`: [Express requires a verified proxy topology](https://expressjs.com/en/guide/behind-proxies/) before trusting forwarded headers. Secure cookies do not require proxy trust here. Behind Render, visitors may share proxy-IP rate buckets and temporarily share limits. Spoofed forwarding headers cannot select a different bucket. Do not use `trust proxy:true`; establish and test a trusted proxy policy before changing IP attribution or scaling. This conservative limit is suitable only for this small review demo.
+
+### Dashboard setup and migration release
+
+1. Sign in to [Neon](https://console.neon.tech) and [Render](https://dashboard.render.com) using Free plans without a payment method. Complete provider login/terms/permissions yourself when required.
+2. In Neon, create a new Free project named `unblock-demo`, choose PostgreSQL 18 (17 also supports these migrations) and the closest region to Render Frankfurt. Do not import or restore local data. In **Roles**, create a dedicated `unblock_app` role; in **Databases**, create `unblock` owned by it. If either already exists, inspect before changing anything. Store its password privately. In **Connect**, select this database/role and turn connection pooling off. Transfer the hostname, database, role and password directly into the separate local production file and provider environment.
+3. In Render, choose **New > Web Service**, connect only the Unblock GitHub repository when granting GitHub access, and select branch `main`, Node runtime, Frankfurt, and **Free**. Keep the root directory blank. Review the configuration below **before** selecting Create Web Service. Use the proposed service name's assigned HTTPS origin for `FRONTEND_ORIGIN`; if Render changes the name, update the origin to match. Leave automatic deploys off so pushes do not bypass migration review.
+4. Before the first public deploy, run the controlled migration release below against the new Neon database. The code checks the Neon hostname and verified TLS, acquires a PostgreSQL advisory lock to serialize this project's release commands, applies only pending `up` migrations in a transaction, and reports only their count. It never calls `down`, resets a database, imports data, or runs at application startup. Unexpected existing schema conflicts fail rather than deleting data. Check the dedicated database and investigate before retrying.
+
+   ```powershell
+   node --env-file=backend/.env.production scripts/release.mjs
+   ```
+
+5. Once the migration release succeeds and the reviewed code is on `origin/main`, enter the secret values directly into Render's **Environment** fields and create/deploy the service. `render.yaml` contains the same settings as a reviewable Blueprint; it provisions no database or paid resource. Its `sync:false` fields request private dashboard entry. Do not use the local file as a build artifact.
+
+| Render field | Exact value |
+| --- | --- |
+| Runtime | Node |
+| Plan | Free |
+| Region | Frankfurt |
+| Branch | `main` |
+| Root directory | Blank (repository root) |
+| Build command | `node scripts/build.mjs --install --prune` |
+| Start command | `node scripts/start.mjs` |
+| Health check | `/api/health` |
+| Auto-deploy | Off |
+| Pre-deploy command | Blank (unavailable on Free) |
+
+[Render's pre-deploy hook is paid-only](https://render.com/docs/deploys). The separate local release command is the no-cost alternative; **do not** run migrations during every cold start or embed production secrets in the build command. Compiled migration imports and TypeORM's CLI use runtime dependencies, so they work after pruning development dependencies.
+
+For redeployment: review code/migrations, run both builds and all tests/lint, push the reviewed commit, run the release command once if schema changed, then use Render **Manual Deploy > Deploy latest commit**. For code-only releases no migration command is needed. Never run local `migration:revert` against production. On failure keep the previous working release and investigate; do not reset Neon. Database backups/exports are a separate owner responsibility.
+
+### Acceptance checks and reviewer access
+
+Before declaring deployment successful, verify the **actual HTTPS URL**: landing/assets/mobile layout, direct `/host`, process/database health, public available-only listing, booking and confirmation, host login/session/logout, protected slot creation and unauthenticated rejection, overlap rejection, and concurrent requests yielding one 201 and one 409. Check persistence after redeploy using an identified synthetic record, then remove only that verification booking followed by its verification slot. Check a fallback confirmation separately; public live AI is pending the terms decision described above. Never fetch or publish an attendee list. Do not delete existing rows to clear tests.
+
+Backend production HTTP tests use mocked databases to check SPA/API separation, assets/404s, CORS, signed Secure cookies, login/session/logout, and tampering. Unit tests check TLS enforcement and production settings without connecting to PostgreSQL. These are not substitutes for hosted database and browser checks. Frontend checks remain `npm run lint` and `node --test tests/scheduling.test.mjs tests/calendar.test.mjs`.
+
+Reviewers can book publicly. To publish availability, ask the project owner privately for the **demo host password** and visit `/host`; the password is deliberately absent from GitHub, public documentation, screenshots, and sample requests. No registration, visitor accounts, public attendee listing, meeting link, or email delivery exists.
+
+### Implemented features, AI tools, and remaining work
+
+Implemented: single-host availability, overlap prevention, atomic double-booking protection, public booking, Europe/Skopje calendar/DST handling, responsive interfaces, protected host access with CSRF and rate limits, and optional Gemini confirmation with a deterministic fallback. OpenAI Codex/ChatGPT assisted implementation, explanations, tests, debugging, and deployment preparation; Gemini is the optional runtime text provider. No attendee details are sent to Gemini.
+
+Known limitations: public deployment and hosted acceptance checks remain pending until provider accounts/secrets are configured; public Gemini is subject to the terms decision above; cold starts and quotas affect availability; in-memory sessions/rate limits require a single instance; proxy clients may share rate limits; there is no cancellation/rescheduling or complete host booked-session view. Google Calendar is intentionally deferred. With more time, add an approved shared session/rate-limit store and tested proxy attribution, operational backups/monitoring, and the deferred calendar integration.

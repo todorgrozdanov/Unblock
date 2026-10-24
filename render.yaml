@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: unblock-demo
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeployTrigger: 'off'
+    buildCommand: node scripts/build.mjs --install --prune
+    startCommand: node scripts/start.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SERVE_FRONTEND
+        value: 'true'
+      - key: DB_SSL
+        value: 'true'
+      - key: DB_PORT
+        value: '5432'
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: HOST_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+# No database resource: create a separate Neon Free project, not Render Postgres.
+# No preDeployCommand: Render restricts that feature to paid web services.
+# Run scripts/release.mjs with production secrets before the first/manual deploy.

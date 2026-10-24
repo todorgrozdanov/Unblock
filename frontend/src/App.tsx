@@ -5,11 +5,19 @@ import { SiteHeader } from './landing/SiteHeader'
 
 export default function App() {
   const [page, setPage] = useState(
-    window.location.hash === '#manage' ? 'manage' : 'book',
+    window.location.pathname.replace(/\/$/, '') === '/host' ||
+      window.location.hash === '#manage'
+      ? 'manage'
+      : 'book',
   )
   useEffect(() => {
     const onNavigation = () =>
-      setPage(window.location.hash === '#manage' ? 'manage' : 'book')
+      setPage(
+        window.location.pathname.replace(/\/$/, '') === '/host' ||
+          window.location.hash === '#manage'
+          ? 'manage'
+          : 'book',
+      )
     window.addEventListener('hashchange', onNavigation)
     return () => window.removeEventListener('hashchange', onNavigation)
   }, [])
