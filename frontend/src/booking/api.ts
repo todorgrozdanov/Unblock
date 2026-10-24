@@ -14,7 +14,8 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = 'The request failed. Please try again.'
     if (response.status === 409 && path === '/api/slots')
-      message = 'That time overlaps an existing slot. Choose another start time or duration.'
+      message =
+        'That time overlaps an existing slot. Choose another start time or duration.'
     if (response.status === 401)
       message = 'Host login is required or the session has expired.'
     if (response.status === 403)
@@ -22,7 +23,9 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
         'Request verification failed. Reload the management page and sign in again.'
     if (response.status === 429)
       message =
-        'Too many login attempts. Please wait up to 15 minutes before trying again.'
+        path === '/api/host/login'
+          ? 'Too many login attempts. Please wait up to 15 minutes before trying again.'
+          : 'Too many booking requests. Your details are preserved. Please wait up to 15 minutes before trying again.'
     if (response.status === 503)
       message = path.startsWith('/api/host/')
         ? 'Host access is unavailable. Check the backend host-password configuration.'

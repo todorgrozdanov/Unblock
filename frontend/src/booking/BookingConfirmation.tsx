@@ -25,9 +25,13 @@ export function BookingConfirmation({
         <h3 id="confirmation-title" tabIndex={-1} ref={heading}>
           You’re booked.
         </h3>
-        <p className="confirmation-thanks">
-          Thank you, {booking.name}. Your consultation is confirmed.
-        </p>
+        <p className="confirmation-thanks">{booking.confirmationMessage}</p>
+        {booking.confirmationMessageSource === 'ai' && (
+          <p className="muted">
+            AI-generated welcome and preparation note · Session details verified
+            by Unblock
+          </p>
+        )}
         <dl className="confirmation-details">
           <div>
             <dt>Session</dt>

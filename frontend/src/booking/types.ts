@@ -10,6 +10,8 @@ export interface BookingDetails {
   taskDescription: string
 }
 export interface BookingResponse {
+  confirmationMessage: string
+  confirmationMessageSource: 'ai' | 'fallback'
   id: string
   name: string
   email: string

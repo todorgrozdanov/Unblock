@@ -163,6 +163,8 @@ Unknown properties, missing required fields, and invalid values return HTTP 400.
 ```json
 {
   "id": "booking-uuid",
+  "confirmationMessage": "Welcome to Unblock! Your consultation is confirmed. Please bring one concrete example of a repetitive task to explore together.",
+  "confirmationMessageSource": "fallback",
   "name": "Alex Example",
   "email": "alex@example.com",
   "taskDescription": "Automate a weekly report",
@@ -194,7 +196,7 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/bookings' `
 
 The controller delegates to `BookingsService`. The service uses injected Slot and Booking repositories to check the slot, check availability, and save the booking to PostgreSQL. The preliminary check improves feedback but cannot prevent a race: two simultaneous requests can both see an available slot. The existing database UNIQUE constraint on `bookings.slotId` allows only one insert. The service recognizes SQLSTATE `23505` specifically for `UQ_bookings_slotId` and returns a friendly 409; unrelated save errors receive a generic 500 without SQL or internal details.
 
-Booked slots disappear from `GET /api/slots` through its existing `NOT EXISTS` filter. The UNIQUE constraint protects each slot from duplicate bookings; the separate slots exclusion constraint prevents the single host from publishing overlapping sessions. No public booking-list endpoint or external integrations are provided.
+Booked slots disappear from `GET /api/slots` through its existing `NOT EXISTS` filter. The UNIQUE constraint protects each slot from duplicate bookings; the separate slots exclusion constraint prevents the single host from publishing overlapping sessions. No public booking-list endpoint or calendar integration is provided. The optional Gemini message is generated only after a successful save, as described below.
 
 Booking HTTP tests use mocked repositories and cover validation, confirmation, missing/started/booked slots, the specific uniqueness violation, and generic handling of other save failures. A separate real PostgreSQL check sends simultaneous HTTP requests for an identified temporary slot, verifies one 201 and one 409 plus exactly one stored booking and availability exclusion, then deletes that test booking before its test slot.
 
@@ -264,3 +266,55 @@ The booking and host pages share near-black backgrounds, warm off-white text, el
 `calendar.ts` provides timezone-aware date keys and date-only month arithmetic using the existing Temporal dependency. `LiveClock` displays ticking time in Europe/Skopje, independently of booking state. Its one-second interval is cleared on unmount, and its changing content is not a live announcement region.
 
 Run the focused calendar checks from `frontend` with `node --test tests/calendar.test.mjs`, alongside the build, lint, and existing timezone checks. They cover Skopje date boundaries, repeated autumn times, leap-year month cells, and year-boundary navigation.
+
+## Optional Gemini booking confirmation
+
+### Local setup (backend only)
+
+The supported SDK is Google's [`@google/genai`](https://ai.google.dev/gemini-api/docs/libraries), installed only in `backend`. The selected model is the stable [`gemini-3.5-flash-lite`](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), suitable for short text generation. Checked on 24 October 2026: Google's [pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists free input and output tokens for this model. Project quotas vary; inspect the actual request/token/day limits in [AI Studio](https://aistudio.google.com/usage?tab=rate-limit), rather than assuming a fixed free allowance. Quotas apply per project, not per key, and provider errors or exhausted quota use Unblock's fallback. No search, grounding, files, chat history, or other tools are enabled.
+
+1. Open [Google AI Studio API keys](https://aistudio.google.com/api-keys), sign in, and create a key in a project showing the Free tier. Do not enable or attach billing for this exercise.
+2. Add these settings directly to the ignored `backend/.env`, preserving database and host settings:
+
+   ```dotenv
+   GEMINI_API_KEY=your_key_entered_locally_only
+   GEMINI_MODEL=gemini-3.5-flash-lite
+   ```
+
+3. Restart the backend. Do not paste the key into chat, commands, README, `.env.example`, or frontend variables. Neither setting is exposed through React; never use a `VITE_` secret.
+4. After building, run `npm run ai:check` from `backend` only when you intend to make one live request. It uses synthetic session timing, never reads a booking, never writes a database record, never prints the key, and reports the message and its source. On fallback it reports only a safe failure category and HTTP status when available, never raw provider errors, credentials, or request data. These diagnostics are not included in API responses. A fallback exits with a nonzero status so it cannot be mistaken for verified live generation. This command is separate from automated tests.
+
+Google's [additional terms](https://ai.google.dev/gemini-api/terms) say unpaid-service prompts/responses may improve Google products and may be reviewed by humans; EEA/Swiss/UK data-use exceptions apply. Do not submit sensitive or personal information. The terms also require Paid Services when making API clients available to users in the EEA, Switzerland, or UK. This step does not enable billing or deploy the app; review those terms before public use with a free-tier key.
+
+### Data sent and request flow
+
+`BookingsService` validates availability and **saves the booking first**, then calls `AiService.generateConfirmation()` directly. No backend-to-backend HTTP request and no database transaction surrounds the AI call. Invalid, missing-slot, started-slot, and conflicting bookings never invoke Gemini. The existing booking response fields remain, with `confirmationMessage` (plain text) and `confirmationMessageSource` (`"ai"` or `"fallback"`) added.
+
+The only per-session context in the Google prompt is:
+
+```json
+{
+  "date": "15 January 2030",
+  "time": "10:30 GMT+1",
+  "durationMinutes": 30,
+  "timezone": "Europe/Skopje"
+}
+```
+
+The request also includes fixed instructions and an output schema. Names, emails, task descriptions, booking/slot IDs, credentials, and other database records are **never included in the prompt**. A new timing-only object is built explicitly instead of serializing an entity. No model responses or AI fields are stored in PostgreSQL, and provider errors/requests are not logged. Google still receives the SDK authentication and normal network/request metadata needed to provide the service.
+
+Gemini returns a one-sentence welcome and one-sentence preparation suggestion in constrained JSON. Unblock validates sentence count/length and rejects markup, links, numbers, extra fields, and unsupported scheduling/email/completion claims. It inserts the authoritative session date, time, duration, and timezone as the middle sentence, producing three plain-text sentences. This keeps session facts out of the model's control. Unsafe, truncated, blocked, empty, or malformed output uses the deterministic fallback instead. The frontend renders text normally, displays **AI-generated** only for source `"ai"`, and retains the authoritative confirmation details and existing booking controls. No generation is triggered by rendering or a React effect.
+
+Unblock waits at most ten seconds, using an abort signal and an independent deadline. The SDK HTTP timeout is also ten seconds because it sets Google's server deadline, which rejects values below ten seconds. Output is capped at 256 tokens, and automatic provider retries are disabled. Cancellation stops waiting locally but does not guarantee Google stops processing the request. Missing key/model, timeout, provider errors, invalid output, and local AI capacity limits all return a friendly fallback. A defensive catch in `BookingsService` also ensures an unexpected AI exception cannot turn a saved booking into a failed booking. The client never automatically retries the booking POST.
+
+### Protected generation endpoint and limits
+
+`POST /api/ai/booking-confirmation` accepts only `{ "bookingId": "a-valid-booking-uuid" }`. It requires the existing host session cookie, matching `Origin`, and `X-CSRF-Token`; the shared ValidationPipe rejects invalid IDs and extra properties. It looks up **only** the linked session timing with a parameterized query and calls the same `AiService`. It returns HTTP 200 with the two message fields, 404 for an unknown booking, 401/403 for failed authentication/CSRF, and 429 when limited. It accepts no user prompt and is not a public LLM proxy. Responses have `Cache-Control: no-store`.
+
+Public `POST /api/bookings` is limited to 10 attempts per socket IP per 15 minutes, including invalid attempts. Host generation is limited to 5 attempts per socket IP per minute after authentication. Limits follow the existing bounded in-memory host-login approach, ignore untrusted forwarded-IP headers, and send `Retry-After` with 429 responses. `AiService` additionally caps actual provider calls at 10 per minute and two concurrent calls across both entry points, returning fallback at capacity. These application limits are not Google's quotas. Like the existing login limit, they reset on restart and require a shared store/explicit trusted-proxy policy before scaling deployment. Login's existing limits are unchanged.
+
+`AiModule` registers the protected controller, service, and Booking repository and is imported by `BookingsModule`, which receives the exported service. The shared `RateLimitModule` provides bounded endpoint counters. No database migration or host-authentication changes are needed for this feature.
+
+### Verification
+
+Both backend Vitest configurations load `test/gemini.mock.ts`, replacing the SDK for **every automated test**, even if a real key exists locally. AI unit and HTTP tests cover valid generation, missing configuration, timeouts/errors, unsafe or empty output, fallback, save-before-generation, successful booking despite AI failure, no generation on invalid/conflicting bookings, host authentication/CSRF, validation, and request limits. They require neither Google access nor PostgreSQL. Run `npm test` and `npm run test:e2e` from `backend`, plus both builds, frontend lint, and the existing frontend timezone/calendar tests. A successful `npm run ai:check` is a separate, explicitly requested live-provider check; passing mocked tests does not prove a key/model is available to your project.
