@@ -6,7 +6,7 @@ Unblock is a single-host automation consultation scheduler built for the TeamLif
 - **Backend:** NestJS and TypeScript
 - **Database:** PostgreSQL, connected through TypeORM in the backend
 
-The frontend checks `GET /api/health` and displays loading, connected, or connection-error feedback. This endpoint checks the API process only, not database connectivity. The starter `GET /` endpoint still returns `Hello World!`.
+The frontend lists available consultation slots and submits bookings to the backend. Slot times and date groups use Europe/Skopje. `GET /api/health` checks the API process only, not database connectivity. The starter `GET /` endpoint still returns `Hello World!`.
 
 ## Run locally
 
@@ -195,3 +195,11 @@ The controller delegates to `BookingsService`. The service uses injected Slot an
 Booked slots disappear from `GET /api/slots` through its existing `NOT EXISTS` filter. No public booking-list endpoint is provided. Authentication, overlap prevention, frontend changes, and external integrations are not part of this step. No schema changes or new migrations are required.
 
 Booking HTTP tests use mocked repositories and cover validation, confirmation, missing/started/booked slots, the specific uniqueness violation, and generic handling of other save failures. A separate real PostgreSQL check sends simultaneous HTTP requests for an identified temporary slot, verifies one 201 and one 409 plus exactly one stored booking and availability exclusion, then deletes that test booking before its test slot.
+
+## Frontend booking flow
+
+Run the backend and frontend in separate terminals using the commands above, then open http://localhost:5173. If no slots exist, create a future slot using the POST /api/slots example. Booking from the page saves a real booking.
+
+`BookingPage` owns availability, the selected slot, form details, loading/error states, pending submission, and confirmation. `SlotPicker` groups slots by date in Europe/Skopje, `BookingForm` renders labelled fields with backend-matching limits, and `BookingConfirmation` displays the returned booking details. The API helper uses native fetch and `VITE_API_URL`; shared TypeScript types match the backend response shapes.
+
+Availability can be refreshed or retried. Submission disables the form while pending. A 409 clears the selection, preserves details, and refreshes the list; other request failures preserve input too. Successful booking shows confirmation and refreshes availability. Form details live only in React memory and are lost on a page reload. This step uses a simple responsive list, without a calendar or ticking clock.
