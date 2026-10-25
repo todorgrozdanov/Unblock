@@ -321,11 +321,13 @@ Both backend Vitest configurations load `test/gemini.mock.ts`, replacing the SDK
 
 ## Public demo and deployment
 
-**Deployment status:** prepared locally; no public URL has been verified yet. Replace this status with the actual URL only after HTTPS checks pass. Google Calendar integration is intentionally deferred.
+**Public demo:** https://unblock-todorgrozdanov.onrender.com
+
+The HTTPS deployment was verified on 24–25 October 2026, including host login/session/logout, publishing availability, booking confirmation, concurrent booking conflicts, and database persistence after an application restart. Only the two synthetic verification bookings and their two slots were removed; existing data was preserved. Google Calendar integration is intentionally deferred.
 
 ### Architecture and no-cost limits
 
-The proposed demo uses one **Render Free web service** in Frankfurt and one separate **Neon Free PostgreSQL project** in the closest available region. These are among the providers suggested by TeamLift. No local database contents are uploaded, and the local PostgreSQL server is never exposed.
+The deployed demo uses one **Render Free web service** in Frankfurt and one separate **Neon Free PostgreSQL project** in Frankfurt. These are among the providers suggested by TeamLift. No local database contents were uploaded, and the local PostgreSQL server is never exposed.
 
 ```text
 Browser --HTTPS--> Render (one NestJS process)
@@ -342,7 +344,7 @@ Checked 24 October 2026: [Render Free](https://render.com/docs/free) sleeps afte
 
 [Neon's current pricing](https://neon.com/pricing) lists Free at $0 with no credit card or time limit, 100 CU-hours/month/project and 1 GB storage/project; confirm the current dashboard limits before creating resources, because older documentation lists smaller storage allowances. Its [free compute scales to zero](https://neon.com/docs/introduction/scale-to-zero) after five minutes idle and resumes on connection. Sleep/wake adds latency. Database rows live in Neon independently of app restarts. Neither free service is an uptime guarantee or a substitute for a production backup plan.
 
-**AI limitation:** the local Gemini integration is implemented and live-tested, but [Google's terms](https://ai.google.dev/gemini-api/terms) require Paid Services for API clients offered to EEA/Swiss/UK users. For a broadly accessible demo without billing, leave production `GEMINI_API_KEY` unset and use the deterministic confirmation fallback. This does not disable local AI. Public live AI verification remains pending until the account/use terms are resolved; do not label fallback as AI-generated or enable billing automatically.
+**AI limitation:** the local Gemini integration is implemented and live-tested, but [Google's terms](https://ai.google.dev/gemini-api/terms) require Paid Services for API clients offered to EEA/Swiss/UK users. The owner approved leaving production `GEMINI_API_KEY` unset and using deterministic fallback confirmations for this no-billing public demo. Local AI stays enabled. Public live AI is intentionally disabled; do not label fallback as AI-generated or enable billing automatically.
 
 ### Reproducible build and runtime
 
@@ -377,6 +379,8 @@ node scripts/prepare-production-env.mjs
 
 It asks for a new production host password with hidden input and creates ignored `backend/.env.production` from the safe example. It writes the scrypt hash and a fresh cryptographically random `SESSION_SECRET` directly to that file without printing either. It refuses to overwrite an existing file. Choose a password different from local development. Open the file privately to complete the remaining settings and transfer values directly to Render's environment dashboard. Never paste the file or values into chat, commit it, screenshot it, or copy the entire development `.env`.
 
+To change an existing production host password, run `npm run host:password` from `backend` in a private terminal. It prompts for a new password twice and prints its hash for private configuration. Replace only `HOST_PASSWORD_HASH` in the ignored production file and Render's Environment settings; when entering a single Render value, omit the `.env` key and surrounding quotes. Keep all example-file placeholders blank. Save the Render setting and deploy the latest commit, wait for **Live**, then refresh `/host` and use the new plaintext password. A local file edit or Render **Save only** does not update the running application. Never use the hash itself as the login password.
+
 | Variable | Production setting |
 | --- | --- |
 | `NODE_ENV` | `production` |
@@ -386,7 +390,7 @@ It asks for a new production host password with hidden input and creates ignored
 | `DB_HOST` | Neon **direct**, non-pooled hostname, without a URL scheme or credentials |
 | `DB_PORT` | `5432` |
 | `DB_NAME` | New dedicated `unblock` database |
-| `DB_USER` | Dedicated production role owning that database, such as `unblock_app` |
+| `DB_USER` | Dedicated production role `unblock_app`, with USAGE/CREATE on the new database's public schema |
 | `DB_PASSWORD` | That role's production password, entered privately |
 | `DB_SSL` | `true`; Node verifies the public CA chain and hostname |
 | `HOST_PASSWORD_HASH` | New production hash from the local helper; paste only the value, without .env quotes |
@@ -403,7 +407,7 @@ Host cookies are signed with HMAC-SHA256 using `SESSION_SECRET` and still contai
 ### Dashboard setup and migration release
 
 1. Sign in to [Neon](https://console.neon.tech) and [Render](https://dashboard.render.com) using Free plans without a payment method. Complete provider login/terms/permissions yourself when required.
-2. In Neon, create a new Free project named `unblock-demo`, choose PostgreSQL 18 (17 also supports these migrations) and the closest region to Render Frankfurt. Do not import or restore local data. In **Roles**, create a dedicated `unblock_app` role; in **Databases**, create `unblock` owned by it. If either already exists, inspect before changing anything. Store its password privately. In **Connect**, select this database/role and turn connection pooling off. Transfer the hostname, database, role and password directly into the separate local production file and provider environment.
+2. In Neon, create a new Free project named `unblock-demo`, choose PostgreSQL 18 (17 also supports these migrations), Frankfurt, and database name `unblock`. Do not import or restore local data. Neon creates `unblock_owner` as database owner. In **Roles**, create a dedicated `unblock_app` role and save its password privately. Keep database ownership with `unblock_owner`; after inspecting the target, explicitly approve and run `GRANT CREATE, USAGE ON SCHEMA public TO "unblock_app";` in this database only. This deployment's grant was approved by the owner and applied to the new empty database. The app role owns the tables its migrations create. Console-created Neon roles also inherit the provider's `neon_superuser` administrative capabilities within this isolated project; further role hardening is future work. In **Connect**, select this database/role and turn connection pooling off. Transfer the hostname, database, role and password directly into the separate local production file and provider environment.
 3. In Render, choose **New > Web Service**, connect only the Unblock GitHub repository when granting GitHub access, and select branch `main`, Node runtime, Frankfurt, and **Free**. Keep the root directory blank. Review the configuration below **before** selecting Create Web Service. Use the proposed service name's assigned HTTPS origin for `FRONTEND_ORIGIN`; if Render changes the name, update the origin to match. Leave automatic deploys off so pushes do not bypass migration review.
 4. Before the first public deploy, run the controlled migration release below against the new Neon database. The code checks the Neon hostname and verified TLS, acquires a PostgreSQL advisory lock to serialize this project's release commands, applies only pending `up` migrations in a transaction, and reports only their count. It never calls `down`, resets a database, imports data, or runs at application startup. Unexpected existing schema conflicts fail rather than deleting data. Check the dedicated database and investigate before retrying.
 
@@ -432,7 +436,9 @@ For redeployment: review code/migrations, run both builds and all tests/lint, pu
 
 ### Acceptance checks and reviewer access
 
-Before declaring deployment successful, verify the **actual HTTPS URL**: landing/assets/mobile layout, direct `/host`, process/database health, public available-only listing, booking and confirmation, host login/session/logout, protected slot creation and unauthenticated rejection, overlap rejection, and concurrent requests yielding one 201 and one 409. Check persistence after redeploy using an identified synthetic record, then remove only that verification booking followed by its verification slot. Check a fallback confirmation separately; public live AI is pending the terms decision described above. Never fetch or publish an attendee list. Do not delete existing rows to clear tests.
+Completed against the **actual HTTPS URL**: landing/assets and direct `/host`, process/database health, public available-only listing with no attendee fields, signed Secure/HttpOnly/SameSite cookies, host login with session persistence across navigation, logout, protected slot creation and unauthenticated write rejection, and overlap rejection. Public browser booking displayed the deterministic fallback confirmation; **Book another session** reset details. Two simultaneous HTTP requests for one test slot returned exactly one 201 and one 409, with exactly one stored booking. A stale browser selection recovered with a helpful conflict message and retained its name/task input. Both test bookings disappeared from availability, survived a Render application restart, and were then deleted before their two test slots. Existing availability was preserved. Desktop/mobile layouts were checked during deployment preparation and the initial public verification; the final browser viewport override did not change the reported viewport, so no additional mobile pass is claimed for the final credential-only redeployment. Public Gemini generation is intentionally disabled under the approved no-billing configuration; local live generation was checked separately. No attendee-list endpoint was fetched or added.
+
+The two compiled migrations were applied once to the new Neon database before initial deployment. Automated verification passed both application builds, 127 backend tests (37 unit and 90 HTTP), frontend lint, and all nine timezone/calendar tests. Backend database/provider dependencies were mocked in those tests; hosted browser/HTTP checks and the restart persistence check were separate. Backend lint had one existing regex warning, with no lint errors.
 
 Backend production HTTP tests use mocked databases to check SPA/API separation, assets/404s, CORS, signed Secure cookies, login/session/logout, and tampering. Unit tests check TLS enforcement and production settings without connecting to PostgreSQL. These are not substitutes for hosted database and browser checks. Frontend checks remain `npm run lint` and `node --test tests/scheduling.test.mjs tests/calendar.test.mjs`.
 
@@ -442,4 +448,4 @@ Reviewers can book publicly. To publish availability, ask the project owner priv
 
 Implemented: single-host availability, overlap prevention, atomic double-booking protection, public booking, Europe/Skopje calendar/DST handling, responsive interfaces, protected host access with CSRF and rate limits, and optional Gemini confirmation with a deterministic fallback. OpenAI Codex/ChatGPT assisted implementation, explanations, tests, debugging, and deployment preparation; Gemini is the optional runtime text provider. No attendee details are sent to Gemini.
 
-Known limitations: public deployment and hosted acceptance checks remain pending until provider accounts/secrets are configured; public Gemini is subject to the terms decision above; cold starts and quotas affect availability; in-memory sessions/rate limits require a single instance; proxy clients may share rate limits; there is no cancellation/rescheduling or complete host booked-session view. Google Calendar is intentionally deferred. With more time, add an approved shared session/rate-limit store and tested proxy attribution, operational backups/monitoring, and the deferred calendar integration.
+Known limitations: public Gemini is intentionally disabled in favor of the fallback; cold starts and quotas affect availability; in-memory sessions/rate limits require a single instance; proxy clients may share rate limits; the Neon console-created app role has administrative privileges within the isolated project; there is no cancellation/rescheduling or complete host booked-session view. Google Calendar is intentionally deferred. With more time, harden the hosted role permissions, add an approved shared session/rate-limit store and tested proxy attribution, operational backups/monitoring, and the deferred calendar integration.

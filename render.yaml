@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: unblock-demo
+    name: unblock-todorgrozdanov
     runtime: node
     plan: free
     region: frankfurt
