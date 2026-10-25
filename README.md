@@ -8,6 +8,21 @@ Unblock is a single-host automation consultation scheduler built for the TeamLif
 
 The frontend lists available consultation slots and submits bookings to the backend. Slot times and date groups use Europe/Skopje. `GET /api/health` checks the API process only, not database connectivity. The starter `GET /` endpoint returns `Hello World!` in backend-only development; the combined deployment serves React at `/` and the protected host interface at `/host`.
 
+## Reviewer quick start: host access
+
+Public booking is available at [Unblock](https://unblock-todorgrozdanov.onrender.com) without signing in. To review publishing availability as the single host:
+
+1. Obtain the **production demo host password** privately from the project owner, Todor Grozdanov, through the internship submission/contact channel. The password is shared separately from this public repository.
+2. Open [Host access](https://unblock-todorgrozdanov.onrender.com/host), or select **Host access** in the website navigation. The free hosting service may take about a minute to wake after inactivity.
+3. Enter the supplied password in **Host password** and click **Sign in**. No username, email, registration, or reviewer account is needed.
+4. On the availability page, choose a future date, start time, and duration of 1–480 minutes, then click **Publish slot**. Scheduling always uses **Europe/Skopje**, even if your browser uses another timezone. Overlapping slots are rejected.
+5. Use **Book a session** to review the public booking flow. Published slots and successful bookings are saved in the demo database. The host list shows only future, unbooked slots; it is not a complete booked schedule and contains no attendee details.
+6. Return to **Host access** and click **Log out** when finished.
+
+The host session lasts one hour and may end earlier when the free service sleeps or restarts. Sign in again if prompted. If the password is rejected, confirm you are using the supplied **production** password, not a localhost password or a password hash. After repeated attempts, wait for the login rate limit to expire before retrying; contact the owner if access still fails.
+
+The real password and its hash are never published in this README or example environment files. For a local clone, configure your own host password using the [local host setup instructions](#single-host-access).
+
 ## Run locally
 
 Prerequisite: Node.js 24 and npm. Run these commands from the repository root in two separate terminals.
@@ -442,7 +457,7 @@ The two compiled migrations were applied once to the new Neon database before in
 
 Backend production HTTP tests use mocked databases to check SPA/API separation, assets/404s, CORS, signed Secure cookies, login/session/logout, and tampering. Unit tests check TLS enforcement and production settings without connecting to PostgreSQL. These are not substitutes for hosted database and browser checks. Frontend checks remain `npm run lint` and `node --test tests/scheduling.test.mjs tests/calendar.test.mjs`.
 
-Reviewers can book publicly. To publish availability, ask the project owner privately for the **demo host password** and visit `/host`; the password is deliberately absent from GitHub, public documentation, screenshots, and sample requests. No registration, visitor accounts, public attendee listing, meeting link, or email delivery exists.
+See [Reviewer quick start: host access](#reviewer-quick-start-host-access) for the public host URL, private password handoff, sign-in steps, and publishing workflow. No registration, visitor accounts, public attendee listing, meeting link, or email delivery exists.
 
 ### Implemented features, AI tools, and remaining work
 
